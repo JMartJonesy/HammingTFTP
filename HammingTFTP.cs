@@ -25,9 +25,10 @@ public class HammingTFTP()
 
 	private const int TFTP_Port = 7000;
 	private const int fullBlock = 516;
-	private const int byteLength = 8;
+	private const string octet = "octet";
 
-	private string mode;
+	private bool error;
+	
 	private string host;
 	private string requestFile;
 
@@ -53,7 +54,7 @@ public class HammingTFTP()
 	public HammingTFTP(string mode, string host, string fileName)
 		:this()
 	{
-		this.mode = mode;
+		error = mode.Equals("error");
 		this.host = host;
 		this.requestFile = fileName;
 		hostIP = null;
@@ -91,8 +92,8 @@ public class HammingTFTP()
 	{
 		opCodes = new Dictionary<string, byte>()
 		{
-			{"read", 1},
-			{"write", 2},
+			{"readError", 1},
+			{"readNoError", 2},
 			{"data", 3},
 			{"ack", 4},
 			{"error", 5}
@@ -185,12 +186,15 @@ public class HammingTFTP()
 	{
 		if(hostIP != null)
 		{
-			byte[] modeBytes = Encoding.ASCII.GetBytes(mode);
+			byte[] modeBytes = Encoding.ASCII.GetBytes(octet);
 			byte[] fileBytes = Encoding.ASCII.GetBytes(requestFile);
 			byte[] requestPacket = new byte[4 + fileBytes.Length  + modeBytes.Length];
 
 			requestPacket[0] = 0;
-			requestPacket[1] = opCodes["read"];
+			if(error)
+				requestPacket[1] = opCodes["readError"];
+			else
+				requestPacket[1] = opCodes["readNoError"];
 			for( int i = 0; i < fileBytes.Length; i++ )
 				requestPacket[i + 2] = fileBytes[i];
 			requestPacket[fileBytes.Length + 2] = 0;
@@ -544,6 +548,6 @@ public class HammingTFTP()
 			tftp.sendRequest();
 		}
 		else
-			Console.WriteLine("Usage: [mono] TFTPreader.exe [netascii|octet] tftp−host file");
+			Console.WriteLine("Usage: [mono] TFTPreader.exe [error|noerror] tftp−host file");
 	}
 }
