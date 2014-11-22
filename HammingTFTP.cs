@@ -11,6 +11,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Net.Sockets;
+using System.Collections;
 using System.Collections.Generic;
 
 /// <summary>
@@ -22,13 +23,16 @@ public class HammingTFTP()
 	//	Class Variables
 	//////////////////////////////////////////////////////
 
-	private const int TFTP_Port = 69;
+	private const int TFTP_Port = 7000;
 	private const int fullBlock = 516;
+	private const int byteLength = 8;
 
 	private string mode;
 	private string host;
 	private string requestFile;
 
+	private HashSet<int> parityBits;
+	
 	private IPAddress hostIP;
 
 	private UdpClient client;
@@ -57,6 +61,7 @@ public class HammingTFTP()
 		receiveLoc = null;
 		testHostName();
 		fillDictionary();
+		fillParityBits();
 	}
 
 	/// <summary>
@@ -94,6 +99,17 @@ public class HammingTFTP()
 		};
 	}
 
+	public void fillParityBits()
+	{
+		parityBits = new HashSet<int>();
+		parityBits.Add(0);
+		parityBits.Add(1);
+		parityBits.Add(3);
+		parityBits.Add(7);
+		parityBits.Add(15);
+		parityBits.Add(31);
+	}
+
 	/// <summary>
 	/// retrieveFile - retrieves a file from the TFTP server sending ACK 
 	///                after each block is received and resending ACKs
@@ -107,13 +123,9 @@ public class HammingTFTP()
 		FileStream fileStream = new FileStream(Directory.GetCurrentDirectory() + "/" + requestFile, FileMode.Create, FileAccess.ReadWrite);
 		
 		int blockNum = 1;
-
-		//Console.WriteLine(block[3]);
 	
 		do
 		{
-			//Console.WriteLine(blockNum);
-			//Console.WriteLine(block.Length);
 			int blockReceived = (256 * (int)block[2]) + (int)block[3];
 			if(blockReceived == blockNum && block[1] == opCodes["data"])
 			{
@@ -159,8 +171,6 @@ public class HammingTFTP()
 		
 		byte[] intBytes = BitConverter.GetBytes(blockNum);
 		
-		//Console.WriteLine(intBytes[0] + " , " + intBytes[1] + " , " + intBytes[2] + " , " + intBytes[3]);
-		
 		packet[2] = intBytes[1];
 		packet[3] = intBytes[0];
 
@@ -187,8 +197,8 @@ public class HammingTFTP()
 			for( int i = 0; i < modeBytes.Length; i++ )
 				requestPacket[fileBytes.Length + 3 + i] = modeBytes[i];
 			requestPacket[requestPacket.Length - 1] = 0;
-	
-			IPEndPoint destination = new IPEndPoint(hostIP, TFTP_Port);
+
+			IPEndPoint destination = new IPEndPoint(hostIP, 7000);
 			byte[] firstBlock = sendReceivePacket(requestPacket, destination, false);
 			if(firstBlock != null)
 			{
@@ -225,9 +235,11 @@ public class HammingTFTP()
 
 				if(finished)
 					return null;
-
+				Console.WriteLine("Receiving packet");
 				receivePacket = client.Receive(ref receiveLoc);
-		
+				Console.WriteLine("Packet Received");
+				receivePacket = checkBits(receivePacket);
+				
 				if(!checkError(receivePacket))
 					return null;
 			}
@@ -245,7 +257,7 @@ public class HammingTFTP()
 	///
 	/// <param name = "packet"> last packet received </param>
 	/// 
-	/// <return> true if packet wasnt an error packet, false othehrwise
+	/// <return> true if packet wasnt an error packet, false otherwise
 	/// </return>
 	public bool checkError(byte[] packet)
 	{
@@ -260,6 +272,256 @@ public class HammingTFTP()
 			return false;
 		}
 		return true;
+	}
+
+	public byte[] checkBits(byte[] packet)
+	{
+		for(int i = 0; i < packet.Length; i++)
+			Console.Write("Block " + i + ":" + Convert.ToString(packet[i], 2).PadLeft(8, '0') + " ");
+		
+		int bytesRead = 4;
+		int strippedIndex = 4;
+		int carryCount = 0;
+		bool[] parityVals = new bool[6];
+		
+		byte[] strippedPacket = new byte[416];
+		byte[] moveBytes = new byte[3];
+		byte[] blockBytes = new byte[4];
+		
+		BitArray strippedBlock = new BitArray(26);
+		BitArray carryBits = new BitArray(8);
+		BitArray convertBits = new BitArray(24);
+		
+		//Copy over opcode and block number bytes since they
+		// dont seem to have any parity bits attached
+		for(int i = 0; i < 3; i++)
+			strippedPacket[i] = packet[i];
+
+		while(bytesRead < packet.Length)
+		{
+			Console.WriteLine("");
+			for(int i = 0; i < 4; i++)
+			{
+				blockBytes[i] = packet[bytesRead + i];
+				Console.Write(Convert.ToString(blockBytes[i], 2).PadLeft(8, '0') + " ");
+			}
+			Console.WriteLine("");
+			
+			BitArray block = new BitArray(blockBytes);
+
+			if(bytesRead < 12)
+			{
+				for(int i = 0; i < block.Count; i++)
+				{
+					if(i != 0 && i % 8 == 0)
+						Console.Write(" ");
+					if(block.Get(i))
+						Console.Write(1);
+					else
+						Console.Write(0);
+
+				}
+				Console.WriteLine("");
+			}
+
+			int onesCount = 0;
+			for(int i = 0; i < parityVals.Length - 1; i++)
+			{
+				parityVals[i] = getParityVal(block, i);
+				if(parityVals[i] == true)
+					onesCount++;
+			}
+			parityVals[5] = overAllParity(block);
+			if(parityVals[5] == true)
+				onesCount++;
+			
+			if(onesCount != 6)
+				if(!attemptBlockFix(ref parityVals, ref block))
+				{
+					return null;
+				}
+				else
+				{
+					onesCount = 0;
+					for(int i = 0; i < parityVals.Length - 1; i++)
+					{
+						parityVals[i] = getParityVal(block, i);
+						if(parityVals[i] == true)
+							onesCount++;
+					}
+					if(onesCount != 5)
+						return null;
+				}
+			else
+				Console.WriteLine("Paritys OK");
+			
+			int sIndex = 0;
+			for(int i = 0; i < block.Count; i++)
+			{
+				if(!parityBits.Contains(i))
+				{
+					strippedBlock.Set(sIndex, block.Get(i));
+					sIndex++;
+				}
+			}
+
+			if(bytesRead < 12)
+			{
+				for(int i = 0; i < strippedBlock.Count; i++)
+				{
+					if(i != 0 && i % 8 == 0)
+						Console.Write(" ");
+					if(strippedBlock.Get(i))
+						Console.Write(1);
+					else
+						Console.Write(0);
+				}
+				Console.WriteLine("");
+			}
+
+			// reverse bit order to original order
+			for(int i = 0; i < strippedBlock.Count / 2; i++)
+			{
+				bool swapBit = strippedBlock.Get(i);
+				strippedBlock.Set(i, strippedBlock.Get(strippedBlock.Count - (i + 1)));
+				strippedBlock.Set(strippedBlock.Count - (i + 1), swapBit);
+			}
+			
+			if(bytesRead < 12)
+			{
+				for(int i = 0; i < strippedBlock.Count; i++)
+				{
+					if(i != 0 && i % 8 == 0)
+						Console.Write(" ");
+					if(strippedBlock.Get(i))
+						Console.Write(1);
+					else
+						Console.Write(0);
+				}
+				Console.WriteLine("");
+			}
+			Console.WriteLine(carryCount);
+			for(int carry = 0; carry < carryCount; carry++)
+				convertBits.Set(carry, carryBits.Get(carry));
+			
+			for(int i = carryCount; i < convertBits.Count; i++)
+			{
+				convertBits.Set(i, strippedBlock.Get(i - carryCount));
+			}
+			
+			if(bytesRead < 12)
+			{
+				for(int i = 0; i < convertBits.Count; i++)
+				{
+					if(i != 0 && i % 8 == 0)
+						Console.Write(" ");
+					if(convertBits.Get(i))
+						Console.Write(1);
+					else
+						Console.Write(0);
+				}
+				Console.WriteLine("");
+			}
+
+			if(bytesRead != 0)
+			{
+				carryCount = carryCount + 2;
+				for(int i = 0; i < carryCount; i++)
+					carryBits.Set(i, strippedBlock.Get(strippedBlock.Count - (i + 1)));
+			}
+
+			convertBits.CopyTo(moveBytes, 0);
+			
+			for(int i = 0; i < moveBytes.Length; i++)
+			{
+				
+				Console.Write(Convert.ToString(moveBytes[i], 2).PadLeft(8, '0') + " ");
+			}
+			Console.WriteLine("");
+			
+			int moveBytesIndex = 0;
+			for(int i = strippedIndex; i < strippedIndex + 3; i++)
+			{
+				strippedPacket[i] = moveBytes[moveBytesIndex];
+				moveBytesIndex++;
+			}
+			strippedIndex += 3;
+			
+			if(carryCount == 8)
+			{
+				byte[] carryByte = new byte[1];
+				carryBits.CopyTo(carryByte, 0);
+				strippedPacket[strippedIndex] = carryByte[0];
+				strippedIndex++;
+				carryCount = 0;
+			}
+			
+			Console.Write("CarryBits: ");
+			for(int i = 0; i < carryCount; i ++)
+				if(carryBits.Get(i))
+					Console.Write(1);
+				else
+					Console.Write(0);
+			Console.WriteLine("");
+			Console.WriteLine("-----------------------");
+			bytesRead += 4;
+		}
+		return strippedPacket;
+	}
+
+	public bool getParityVal(BitArray block, int parity)
+	{
+		int onesCount = 0;
+		int startIndex = (int)Math.Pow(2, parity) - 1;
+		int endIndex = block.Count - 1;
+		int incrementor = (int)Math.Pow(2, parity + 1); 
+		
+		int count = 0;
+		int index;
+
+		for(int i = startIndex; i < endIndex; i += incrementor)
+		{
+			if(block.Get(i) == true)
+			{
+				onesCount++;
+			}
+			index = i + 1;
+			while(index < endIndex && count < ((incrementor/2) - 1))
+			{	
+				if(block.Get(index) == true)
+				{
+					onesCount++;
+				}
+				index++;
+				count++;
+			}
+			count = 0;
+		}
+		return ((onesCount % 2) == 0);
+	}
+
+	public bool overAllParity(BitArray block)
+	{
+		int onesCount = 0;
+		for(int bit = 0; bit < block.Count; bit++)
+			if(block.Get(bit) == true)
+				onesCount++;
+
+		return (onesCount % 2 == 0);
+	}
+
+	public bool attemptBlockFix(ref bool[] parityVals, ref BitArray block)
+	{
+		int changeIndex = 0;
+		for(int i = 0; i < parityVals.Length - 1; i++)
+			if(parityVals[i] == false)
+				changeIndex += (int)Math.Pow(2, i);
+		bool bit = block.Get(changeIndex);
+		bit = !bit;
+		block.Set(changeIndex, bit);
+		parityVals[5] = !parityVals[5];
+		
+		return (parityVals[5] == true);
 	}
 
 	/// <summary>
