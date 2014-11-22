@@ -24,7 +24,7 @@ public class HammingTFTP()
 	//////////////////////////////////////////////////////
 
 	private const int TFTP_Port = 7000;
-	private const int fullBlock = 516;
+	private const int fullBlock = 420;
 	private const string octet = "octet";
 
 	private bool error;
@@ -92,8 +92,8 @@ public class HammingTFTP()
 	{
 		opCodes = new Dictionary<string, byte>()
 		{
-			{"readError", 1},
-			{"readNoError", 2},
+			{"readNoError", 1},
+			{"readError", 2},
 			{"data", 3},
 			{"ack", 4},
 			{"error", 5}
@@ -124,10 +124,12 @@ public class HammingTFTP()
 		FileStream fileStream = new FileStream(Directory.GetCurrentDirectory() + "/" + requestFile, FileMode.Create, FileAccess.ReadWrite);
 		
 		int blockNum = 1;
-	
-		do
+
+		while(block != null && block.Length == fullBlock)
 		{
+			Console.WriteLine("-------------------------------->" + block.Length + "<---------------------------------------");
 			int blockReceived = (256 * (int)block[2]) + (int)block[3];
+			Console.WriteLine(blockReceived);
 			if(blockReceived == blockNum && block[1] == opCodes["data"])
 			{
 				fileStream.Write(block, 4, block.Length - 4);
@@ -140,8 +142,7 @@ public class HammingTFTP()
 			{
 				block = sendAck(blockNum - 1, false);
 			}
-		}
-		while(block != null && block.Length == fullBlock);
+		};
 		
 		if(block != null)
 		{
@@ -233,9 +234,7 @@ public class HammingTFTP()
 			try
 			{
 				client.Send(packet, packet.Length, destination);
-				//int port = destination.Port;
 				receiveLoc = destination;
-				//new IPEndPoint(hostIP, port);
 
 				if(finished)
 					return null;
@@ -288,7 +287,7 @@ public class HammingTFTP()
 		int carryCount = 0;
 		bool[] parityVals = new bool[6];
 		
-		byte[] strippedPacket = new byte[416];
+		byte[] strippedPacket = new byte[420];
 		byte[] moveBytes = new byte[3];
 		byte[] blockBytes = new byte[4];
 		
@@ -298,7 +297,7 @@ public class HammingTFTP()
 		
 		//Copy over opcode and block number bytes since they
 		// dont seem to have any parity bits attached
-		for(int i = 0; i < 3; i++)
+		for(int i = 0; i < 4; i++)
 			strippedPacket[i] = packet[i];
 
 		while(bytesRead < packet.Length)
@@ -342,6 +341,7 @@ public class HammingTFTP()
 			if(onesCount != 6)
 				if(!attemptBlockFix(ref parityVals, ref block))
 				{
+
 					return null;
 				}
 				else
@@ -404,7 +404,6 @@ public class HammingTFTP()
 				}
 				Console.WriteLine("");
 			}
-			Console.WriteLine(carryCount);
 			for(int carry = 0; carry < carryCount; carry++)
 				convertBits.Set(carry, carryBits.Get(carry));
 			
@@ -444,6 +443,7 @@ public class HammingTFTP()
 			Console.WriteLine("");
 			
 			int moveBytesIndex = 0;
+			Console.WriteLine(strippedIndex);
 			for(int i = strippedIndex; i < strippedIndex + 3; i++)
 			{
 				strippedPacket[i] = moveBytes[moveBytesIndex];
@@ -470,7 +470,24 @@ public class HammingTFTP()
 			Console.WriteLine("-----------------------");
 			bytesRead += 4;
 		}
-		return strippedPacket;
+		int zeroCount = 0;
+		for(int i = strippedPacket.Length - 1; i >= 0; i--)
+		{
+			if(strippedPacket[i] == 0)
+				zeroCount++;
+			else
+				break;
+		}
+
+		if(zeroCount != 0)
+		{
+			byte[] zeroesRemoved = new byte[fullBlock - zeroCount];
+			for(int i = 0; i < zeroesRemoved.Length; i++)
+				zeroesRemoved[i] = strippedPacket[i];
+			return zeroesRemoved;
+		}
+		else
+			return strippedPacket;
 	}
 
 	public bool getParityVal(BitArray block, int parity)
