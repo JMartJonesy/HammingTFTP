@@ -233,16 +233,23 @@ public class HammingTFTP()
 		{
 			try
 			{
-				client.Send(packet, packet.Length, destination);
-				receiveLoc = destination;
+				Console.WriteLine("");	
+				do
+				{
+					client.Send(packet, packet.Length, destination);
+					receiveLoc = destination;
+					if(finished)
+						return null;
+					Console.WriteLine("Receiving packet");
+					receivePacket = client.Receive(ref receiveLoc);
+					Console.WriteLine("Packet Received");
+					for(int i = 0; i < receivePacket.Length; i++)
+					Console.Write("Block " + i + ":" + Convert.ToString(receivePacket[i], 2).PadLeft(8, '0') + " ");
+					receivePacket = checkBits(receivePacket);
+					//Construct nack here
+				}
+				while(receivePacket == null);
 
-				if(finished)
-					return null;
-				Console.WriteLine("Receiving packet");
-				receivePacket = client.Receive(ref receiveLoc);
-				Console.WriteLine("Packet Received");
-				receivePacket = checkBits(receivePacket);
-				
 				if(!checkError(receivePacket))
 					return null;
 			}
