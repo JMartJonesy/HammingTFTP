@@ -319,7 +319,7 @@ public class HammingTFTP()
 			
 			BitArray block = new BitArray(blockBytes);
 
-			if(bytesRead < 12)
+			if(bytesRead < 20)
 			{
 				for(int i = 0; i < block.Count; i++)
 				{
@@ -376,7 +376,7 @@ public class HammingTFTP()
 				}
 			}
 
-			if(bytesRead < 12)
+			if(bytesRead < 20)
 			{
 				for(int i = 0; i < strippedBlock.Count; i++)
 				{
@@ -398,7 +398,7 @@ public class HammingTFTP()
 				strippedBlock.Set(strippedBlock.Count - (i + 1), swapBit);
 			}
 			
-			if(bytesRead < 12)
+			if(bytesRead < 20)
 			{
 				for(int i = 0; i < strippedBlock.Count; i++)
 				{
@@ -419,7 +419,7 @@ public class HammingTFTP()
 				convertBits.Set(i, strippedBlock.Get(i - carryCount));
 			}
 			
-			if(bytesRead < 12)
+			if(bytesRead < 20)
 			{
 				for(int i = 0; i < convertBits.Count; i++)
 				{
@@ -450,7 +450,6 @@ public class HammingTFTP()
 			Console.WriteLine("");
 			
 			int moveBytesIndex = 0;
-			Console.WriteLine(strippedIndex);
 			for(int i = strippedIndex; i < strippedIndex + 3; i++)
 			{
 				strippedPacket[i] = moveBytes[moveBytesIndex];
@@ -466,7 +465,7 @@ public class HammingTFTP()
 				strippedIndex++;
 				carryCount = 0;
 			}
-			
+			Console.WriteLine(carryCount);	
 			Console.Write("CarryBits: ");
 			for(int i = 0; i < carryCount; i ++)
 				if(carryBits.Get(i))
