@@ -96,7 +96,8 @@ public class HammingTFTP()
 			{"readError", 2},
 			{"data", 3},
 			{"ack", 4},
-			{"error", 5}
+			{"error", 5},
+			{"nack", 6}
 		};
 	}
 
@@ -172,11 +173,22 @@ public class HammingTFTP()
 		packet[1] = opCodes["ack"];
 		
 		byte[] intBytes = BitConverter.GetBytes(blockNum);
-		
 		packet[2] = intBytes[1];
 		packet[3] = intBytes[0];
 
 		return sendReceivePacket(packet, receiveLoc, finished);
+	}
+
+	public byte[] constructNack(byte[] blockNum)
+	{
+		byte[] packet = new byte[4];
+		packet[0] = 0;
+		packet[1] = opCodes["nack"];
+
+		packet[2] = blockNum[0];
+		packet[3] = blockNum[1];
+		
+		return packet;
 	}
 
 	/// <summary>
@@ -229,24 +241,38 @@ public class HammingTFTP()
 	public byte[] sendReceivePacket(byte[] packet, IPEndPoint destination, bool finished)
 	{
 		byte[] receivePacket = null;
+		byte[] nackPacket = null;
+		byte[] blockNum = null;
 		while(receivePacket == null)
 		{
 			try
 			{
 				Console.WriteLine("");	
 				do
-				{
+				{	
 					client.Send(packet, packet.Length, destination);
 					receiveLoc = destination;
 					if(finished)
 						return null;
 					Console.WriteLine("Receiving packet");
 					receivePacket = client.Receive(ref receiveLoc);
+					if(blockNum == null)
+					{
+						blockNum = new byte[2];
+						blockNum[0] = receivePacket[2];
+						blockNum[1] = receivePacket[3];
+					}
 					Console.WriteLine("Packet Received");
-					for(int i = 0; i < receivePacket.Length; i++)
-					Console.Write("Block " + i + ":" + Convert.ToString(receivePacket[i], 2).PadLeft(8, '0') + " ");
+					//for(int i = 0; i < receivePacket.Length; i++)
+					//Console.Write("Block " + i + ":" + Convert.ToString(receivePacket[i], 2).PadLeft(8, '0') + " ");
 					receivePacket = checkBits(receivePacket);
-					//Construct nack here
+					if(receivePacket == null && nackPacket == null)
+						nackPacket = constructNack(blockNum);
+					if(receivePacket == null)
+					{
+						packet = nackPacket;
+						Console.WriteLine("-------------------------------------------------------------------------Sending Nack");
+					}
 				}
 				while(receivePacket == null);
 
@@ -286,8 +312,8 @@ public class HammingTFTP()
 
 	public byte[] checkBits(byte[] packet)
 	{
-		for(int i = 0; i < packet.Length; i++)
-			Console.Write("Block " + i + ":" + Convert.ToString(packet[i], 2).PadLeft(8, '0') + " ");
+		//for(int i = 0; i < packet.Length; i++)
+		//	Console.Write("Block " + i + ":" + Convert.ToString(packet[i], 2).PadLeft(8, '0') + " ");
 		
 		int bytesRead = 4;
 		int strippedIndex = 4;
@@ -315,24 +341,9 @@ public class HammingTFTP()
 				blockBytes[i] = packet[bytesRead + i];
 				Console.Write(Convert.ToString(blockBytes[i], 2).PadLeft(8, '0') + " ");
 			}
-			Console.WriteLine("");
+			Console.WriteLine("<-Bytes received");
 			
 			BitArray block = new BitArray(blockBytes);
-
-			if(bytesRead < 20)
-			{
-				for(int i = 0; i < block.Count; i++)
-				{
-					if(i != 0 && i % 8 == 0)
-						Console.Write(" ");
-					if(block.Get(i))
-						Console.Write(1);
-					else
-						Console.Write(0);
-
-				}
-				Console.WriteLine("");
-			}
 
 			int onesCount = 0;
 			for(int i = 0; i < parityVals.Length - 1; i++)
@@ -376,20 +387,6 @@ public class HammingTFTP()
 				}
 			}
 
-			if(bytesRead < 20)
-			{
-				for(int i = 0; i < strippedBlock.Count; i++)
-				{
-					if(i != 0 && i % 8 == 0)
-						Console.Write(" ");
-					if(strippedBlock.Get(i))
-						Console.Write(1);
-					else
-						Console.Write(0);
-				}
-				Console.WriteLine("");
-			}
-
 			// reverse bit order to original order
 			for(int i = 0; i < strippedBlock.Count / 2; i++)
 			{
@@ -398,7 +395,7 @@ public class HammingTFTP()
 				strippedBlock.Set(strippedBlock.Count - (i + 1), swapBit);
 			}
 			
-			if(bytesRead < 20)
+			if(bytesRead < 100)
 			{
 				for(int i = 0; i < strippedBlock.Count; i++)
 				{
@@ -409,30 +406,16 @@ public class HammingTFTP()
 					else
 						Console.Write(0);
 				}
-				Console.WriteLine("");
+				Console.WriteLine("<-Removed parity bits");
 			}
 			for(int carry = 0; carry < carryCount; carry++)
-				convertBits.Set(carry, carryBits.Get(carry));
+				convertBits.Set(carry, carryBits.Get(carryCount - (carry + 1)));
 			
 			for(int i = carryCount; i < convertBits.Count; i++)
 			{
 				convertBits.Set(i, strippedBlock.Get(i - carryCount));
 			}
 			
-			if(bytesRead < 20)
-			{
-				for(int i = 0; i < convertBits.Count; i++)
-				{
-					if(i != 0 && i % 8 == 0)
-						Console.Write(" ");
-					if(convertBits.Get(i))
-						Console.Write(1);
-					else
-						Console.Write(0);
-				}
-				Console.WriteLine("");
-			}
-
 			if(bytesRead != 0)
 			{
 				carryCount = carryCount + 2;
@@ -447,7 +430,7 @@ public class HammingTFTP()
 				
 				Console.Write(Convert.ToString(moveBytes[i], 2).PadLeft(8, '0') + " ");
 			}
-			Console.WriteLine("");
+			Console.WriteLine("<-3 Bytes to Write");
 			
 			int moveBytesIndex = 0;
 			for(int i = strippedIndex; i < strippedIndex + 3; i++)
@@ -460,6 +443,12 @@ public class HammingTFTP()
 			if(carryCount == 8)
 			{
 				byte[] carryByte = new byte[1];
+				for(int i = 0; i < carryBits.Length / 2; i++)
+				{
+					bool swapBit = carryBits.Get(i);
+					carryBits.Set(i, carryBits.Get(carryBits.Count - (i + 1)));
+					carryBits.Set(carryBits.Count - (i + 1), swapBit);
+				}
 				carryBits.CopyTo(carryByte, 0);
 				strippedPacket[strippedIndex] = carryByte[0];
 				strippedIndex++;
@@ -539,6 +528,7 @@ public class HammingTFTP()
 
 	public bool attemptBlockFix(ref bool[] parityVals, ref BitArray block)
 	{
+		Console.WriteLine("OH SNAP");
 		int changeIndex = 0;
 		for(int i = 0; i < parityVals.Length - 1; i++)
 			if(parityVals[i] == false)
