@@ -17,7 +17,7 @@ using System.Collections.Generic;
 /// <summary>
 /// This class contains all the methods neede to read a file from a TFTP server
 /// </summary>
-public class HammingTFTP()
+public class HammingTFTP
 {
         //////////////////////////////////////////////////////
 	//	Class Variables
@@ -53,7 +53,6 @@ public class HammingTFTP()
 	/// <param name = "host"> the host name of the TFTP server </param>
 	/// <param name = "fileName"> file to retrieve from server </param>
 	public HammingTFTP(string mode, string host, string fileName)
-		:this()
 	{
 		error = mode.Equals("error");
 		this.host = host;
@@ -82,6 +81,7 @@ public class HammingTFTP()
 		}
 		catch(Exception e)
 		{
+			e.ToString();
 			Console.WriteLine("Host: " + host + " not found");
 			hostIP = null;
 		}
@@ -179,14 +179,17 @@ public class HammingTFTP()
 		
 		if(block != null)
 		{
-			
+			if(prevBlock == null)
+				prevBlock = block;
 			sendAck(blockNum, true);
 			int zeroCount = 0;
 			for(int i = prevBlock.Length - 1; i >= 0 ; i--)
 				if( prevBlock[i] == 0 )
 					zeroCount++;
-			zeroCount = (zeroCount / 4) * 4;
-			fileStream.Write(prevBlock, 4, prevBlock.Length - 4);
+			int end = prevBlock.Length - 4 - zeroCount + 1;
+			if( end < 0 )
+				end = prevBlock.Length - 4;
+			fileStream.Write(prevBlock, 4, end);
 			Console.WriteLine("");
 			Console.WriteLine("File: " + requestFile + " successfully downloaded");
 		}
@@ -320,6 +323,7 @@ public class HammingTFTP()
 			}
 			catch(SocketException e)
 			{
+				e.ToString();
 			}
 		}
 		return receivePacket;
